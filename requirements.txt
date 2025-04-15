@@ -3,5 +3,4 @@ openai
 sounddevice
 whisper
 soundfile
-os
 numpy
