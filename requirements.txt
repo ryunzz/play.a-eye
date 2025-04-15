@@ -1,0 +1,7 @@
+openai-whisper 
+openai
+sounddevice
+whisper
+soundfile
+os
+numpy
