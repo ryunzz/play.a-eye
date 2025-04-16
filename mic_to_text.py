@@ -13,12 +13,12 @@ deepl_client = deepl.DeepLClient(os.getenv("DEEPL_API_KEY"))
 target_language = input("Enter target language (e.g., 'ES' for Spanish, 'FR' for French): ").strip().upper()
 streaming_active = True
 
-# def clear_console():
-#     """Clear the console screen"""
-#     if sys.platform == 'win32':
-#         os.system('cls')
-#     else:
-#         os.system('clear')
+def clear_console():
+    """Clear the console screen"""
+    if sys.platform == 'win32':
+        os.system('cls')
+    else:
+        os.system('clear')
 
 #use google cloud translation API to translate text to target language
 def translate_text(text, target_language):
@@ -27,7 +27,6 @@ def translate_text(text, target_language):
     
     try:
         result = deepl_client.translate_text(text, target_lang=target_language)
-        print(result)
         return result
     except Exception as e:
         print(f"Translation error: {e}")
@@ -88,7 +87,7 @@ def stream_speech_to_text():
     update_cooldown = 0.3 #display update parameter
     
     try:
-        # clear_console()
+        clear_console()
         print(">>> Listening in real-time (Press Ctrl+C to stop)...")
         print("Speak now...")
         
@@ -107,16 +106,16 @@ def stream_speech_to_text():
             if (transcript != last_transcript and 
                 (result.is_final or current_time - last_update_time >= update_cooldown)):
                 
-                # clear_console()
+                clear_console()
                 
                 translated_text = translate_text(transcript, target_language)
                 
                 print(">>> Listening in real-time (Press Ctrl+C to stop)...")
                 
                 if result.is_final:
-                    print(f"Final: {transcript}")
+                    print(f"Transcription: {transcript}")
                 else:
-                    print(f"Interim: {transcript}")
+                    print(f"Transcription: {transcript}")
                     
                 print(f"Translation: {translated_text}")
                 
@@ -141,7 +140,7 @@ def main():
     time.sleep(3)
     
     try:
-        # clear_console()
+        clear_console()
         stream_speech_to_text()
     except KeyboardInterrupt:
         print("\nProgram terminated by user.")
