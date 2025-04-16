@@ -1,6 +1,4 @@
-openai-whisper 
-openai
-sounddevice
-whisper
-soundfile
-numpy
+google-cloud-speech>=2.0.0
+python-dotenv>=0.15.0
+deepl>=1.0.0
+PyAudio>=0.2.11
