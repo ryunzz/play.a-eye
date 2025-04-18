@@ -132,11 +132,11 @@ def stream_speech_to_text():
                 print(f"Transcription: {transcript}")
                 
                 #check if the transcript starts with "Hey Sentient"
-                trigger_pattern = r'^\s*hey\s*,?\s*sentient\b'
+                trigger_pattern = r'\s*hey\s*,?\s*sentient\b.?\s*'
                 if re.search(trigger_pattern, transcript, re.IGNORECASE):
                     #only switch to OpenAI mode and extract question on final results
                     if result.is_final:
-                        openai_question = re.sub(trigger_pattern, '', transcript, flags=re.IGNORECASE).strip()[2:]
+                        openai_question = re.sub(trigger_pattern, '', transcript, flags=re.IGNORECASE).strip()
                         
                         if openai_question:
                             openai_response = ask_openai_question(openai_question)
