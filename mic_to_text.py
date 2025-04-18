@@ -15,6 +15,10 @@ deepl_client = deepl.Translator(os.getenv("DEEPL_API_KEY"))
 target_language = input("Enter target language (e.g., 'ES' for Spanish, 'FR' for French): ").strip().upper()
 streaming_active = True
 
+# Conversation state management
+conversation_active = False
+conversation_history = []
+
 def clear_console():
     """Clear the console screen"""
     if sys.platform == 'win32':
@@ -33,6 +37,48 @@ def translate_text(text, target_language):
     except Exception as e:
         print(f"Translation error: {e}")
         return "(Translation error)"
+
+#handle conversation with OpenAI LLM
+def handle_conversation(user_input):
+    global conversation_active, conversation_history
+    
+    if not user_input or user_input.isspace():
+        return "(Empty input detected)"
+    
+    # Check for conversation end
+    if re.search(r'\s*slay\s*,?\s*sentient\b', user_input, re.IGNORECASE):
+        conversation_active = False
+        conversation_history = []
+        return "Goodbye! It was nice talking to you."
+        
+    try:
+        # Add user's message to conversation history
+        conversation_history.append({"role": "user", "content": user_input})
+        
+        # Prepare messages with conversation history
+        messages = [
+            {"role": "system", "content": "You are a helpful and friendly AI assistant named Sentient. Engage in natural conversation while being helpful and concise."}
+        ] + conversation_history
+        
+        response = llm.chat.completions.create(
+            model="gpt-4",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=150
+        )
+        answer = response.choices[0].message.content.strip()
+        
+        # Add assistant's response to conversation history
+        conversation_history.append({"role": "assistant", "content": answer})
+        
+        # Keep conversation history manageable (last 10 exchanges)
+        if len(conversation_history) > 20:
+            conversation_history = conversation_history[-20:]
+            
+        return answer
+    except Exception as e:
+        print(f"OpenAI API error: {e}")
+        return f"(OpenAI Error: {str(e)})"
 
 #ask an OpenAI LLM question if transcript starts with "Hey Sentient"
 llm = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -83,7 +129,6 @@ def stream_speech_to_text():
             stream_callback=None
         )
 
-        #add a slight delay to allow audio interface to initialize
         time.sleep(0.5)
 
         print("Stream active. Start speaking...")
@@ -96,7 +141,6 @@ def stream_speech_to_text():
         audio_stream.close()
         audio_interface.terminate()
 
-    #generating audio stream
     audio_generator_instance = audio_generator()
     requests = (speech.StreamingRecognizeRequest(audio_content=content)
                 for content in audio_generator_instance)
@@ -105,13 +149,18 @@ def stream_speech_to_text():
 
     last_transcript = ""
     last_update_time = time.time()
-    update_cooldown = 0.3 #display update parameter
-    openai_question = "" #store the question 
+    update_cooldown = 0.3
+    current_input = ""
+    global conversation_active
 
     try:
         clear_console()
         print(">>> Listening in real-time (Press Ctrl+C to stop)...")
         print("Speak now...")
+        if conversation_active:
+            print(">>> In conversation with Sentient (say 'bye, sentient' to end)")
+        else:
+            print(">>> Say 'hey, sentient' to start a conversation")
 
         for response in responses:
             if not response.results:
@@ -121,34 +170,44 @@ def stream_speech_to_text():
             transcript = result.alternatives[0].transcript
 
             current_time = time.time()
-            #we only update the display if:
-            #1. We have new content AND
-            #2. Final result or enough time has elapsed since last update
             if (transcript != last_transcript and 
                 (result.is_final or current_time - last_update_time >= update_cooldown)):
 
                 clear_console()
                 print(">>> Listening in real-time (Press Ctrl+C to stop)...")
-                print(f"Transcription: {transcript}")
-                
-                #check if the transcript starts with "Hey Sentient"
-                trigger_pattern = r'\s*hey\s*,?\s*sentient\b.?\s*'
-                if re.search(trigger_pattern, transcript, re.IGNORECASE):
-                    #only switch to OpenAI mode and extract question on final results
-                    if result.is_final:
-                        openai_question = re.sub(trigger_pattern, '', transcript, flags=re.IGNORECASE).strip()
-                        
-                        if openai_question:
-                            openai_response = ask_openai_question(openai_question)
-                            print("\n>>> OpenAI LLM Response:")
-                            print(f"Question: {openai_question}")
-                            print(f"Answer: {openai_response}")
-                        else:
-                            print("\n>>> Waiting for question after 'Hey Sentient'...")
+                if conversation_active:
+                    print(">>> In conversation with Sentient (say 'bye, sentient' to end)")
                 else:
-                    #always do translation regardless of whether it's final or interim
-                    translated_text = translate_text(transcript, target_language)
-                    print(f"Translation: {translated_text}")
+                    print(">>> Say 'hey, sentient' to start a conversation")
+                print(f"Transcription: {transcript}")
+
+                # Always translate everything
+                translated_text = translate_text(transcript, target_language)
+                print(f"Translation: {translated_text}")
+
+                # Handle conversation if needed
+                if result.is_final:
+                    if not conversation_active:
+                        # Check for conversation start
+                        if re.search(r'\s*hey\s*,?\s*sentient\b.?\s*', transcript, re.IGNORECASE):
+                            conversation_active = True
+                            print("\n>>> Starting conversation with Sentient...")
+                            response = handle_conversation("Hello!")
+                            print(f"Sentient: {response}")
+                            # Translate Sentient's response too
+                            translated_response = translate_text(response, target_language)
+                            print(f"Translation: {translated_response}")
+                    else:
+                        # Continue conversation
+                        response = handle_conversation(transcript)
+                        print(f"Sentient: {response}")
+                        # Translate Sentient's response too
+                        translated_response = translate_text(response, target_language)
+                        print(f"Translation: {translated_response}")
+                        
+                        # Check if conversation just ended
+                        if not conversation_active:
+                            print("\n>>> Conversation ended. Say 'Hey Sentient' to start a new conversation.")
 
                 last_transcript = transcript
                 last_update_time = current_time
