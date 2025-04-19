@@ -10,4 +10,4 @@ The system uses an Arduino Nano as the central controller, connected to an HC-05
 To make the text visible to the wearer, a mirror and magnifying lens setup projects the display into the user’s line of sight without obstructing normal vision. All components are housed within a 3D printed shell designed to be lightweight and wearable throughout a workday.
 
 ## How to run
-
+To run software: simply install dependencies and add your API keys, then just run "python mic_to_text.py". For all the hardware, you unfortunately cannot run that at home :(
