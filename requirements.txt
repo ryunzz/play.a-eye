@@ -3,3 +3,4 @@ python-dotenv
 deepl
 openai
 pyaudio
+serial
