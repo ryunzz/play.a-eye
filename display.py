@@ -39,22 +39,7 @@ target_number = None
 num_guesses = 0
 
 campus_places = [
-    "GEISEL LIBRARY",
-    "WONG AVERY LIBRARY", 
-    "REVELLE COLLEGE",
-    "MUIR COLLEGE",
-    "WARREN COLLEGE",
-    "MARSHALL COLLEGE",
-    "EIGHTH COLLEGE",
-    "SEVENTH COLLEGE",
-    "SIXTH COLLEGE",
-    "ERC",
-    "PRICE CENTER",
-    "PEPPER CANYON",
-    "RIMAC",
-    "SUN GOD LAWN",
-    "SCRIPPS INSTITUTION",
-    "BIRCH AQUARIUM",
+    "ERC"
 ]
 
 # ─── Serial Helpers ─────────────────────────────────────────────────────────────
@@ -63,38 +48,57 @@ arduino = None
 def establish_connection():
     global arduino
     try:
+        print(f"[DEBUG] Attempting to connect to Arduino on {ARDUINO_PORT}")
         arduino = serial.Serial(ARDUINO_PORT, ARDUINO_BAUD, timeout=0.1)
         time.sleep(2)  # allow Arduino to reset
         arduino.reset_input_buffer()
-        return _send_and_wait("TEST", expect_contains="Ready")
+        print("[DEBUG] Arduino connection established, testing communication...")
+        if _send_and_wait("TEST", expect_contains="Ready"):
+            print("[DEBUG] Arduino communication test successful")
+            return True
+        else:
+            print("[ERROR] Arduino communication test failed")
+            return False
     except Exception as e:
         print(f"[ERROR] Opening {ARDUINO_PORT}: {e}")
         return False
 
 def _send_and_wait(msg, expect_contains=None):
     """Send msg\\n, wait for an ACK or for expect_contains in reply."""
+    print(f"[DEBUG] Sending to Arduino: '{msg}'")
     for attempt in range(ACK_RETRIES):
-        arduino.write((msg + "\n").encode())
-        deadline = time.time() + ACK_TIMEOUT
-        while time.time() < deadline:
-            line = arduino.readline().decode(errors="ignore").strip()
-            if not line:
-                continue
-            if line.startswith("ACK:"):
-                return True
-            if expect_contains and expect_contains in line:
-                # echo back an ACK so callers see success
-                arduino.write(f"ACK:{msg}\n".encode())
-                return True
-        print(f"[WARN] No ACK for '{msg}' (attempt {attempt+1}/{ACK_RETRIES})")
+        try:
+            arduino.write((msg + "\n").encode())
+            print(f"[DEBUG] Written to Arduino (attempt {attempt+1}/{ACK_RETRIES})")
+            deadline = time.time() + ACK_TIMEOUT
+            while time.time() < deadline:
+                line = arduino.readline().decode(errors="ignore").strip()
+                if not line:
+                    continue
+                print(f"[DEBUG] Arduino response: '{line}'")
+                if line.startswith("ACK:"):
+                    print(f"[DEBUG] Received ACK for '{msg}'")
+                    return True
+                if expect_contains and expect_contains in line:
+                    print(f"[DEBUG] Received expected response containing '{expect_contains}'")
+                    # echo back an ACK so callers see success
+                    arduino.write(f"ACK:{msg}\n".encode())
+                    return True
+            print(f"[WARN] No ACK for '{msg}' (attempt {attempt+1}/{ACK_RETRIES})")
+        except Exception as e:
+            print(f"[ERROR] Arduino communication error: {e}")
     return False
 
 def send_to_arduino(prefix, text=""):
     """Formats and sends prefix+text (e.g. 'T:', 'R:', 'G:')."""
     if not arduino or not arduino.is_open:
+        print("[WARN] Cannot send to Arduino - not connected")
         return
     payload = f"{prefix}{text}"[:95]  # clamp length
-    _send_and_wait(payload)
+    print(f"[DEBUG] Preparing Arduino message: {payload}")
+    success = _send_and_wait(payload)
+    if not success:
+        print(f"[WARN] Failed to send message to Arduino: {payload}")
 
 # ─── Utility Functions ─────────────────────────────────────────────────────────
 def clear_console():
@@ -124,8 +128,7 @@ def start_wordle_game():
     print(f"Guess the campus location: {' '.join(wordle_display)}")
     print(f"Strikes: {wordle_strikes}/{wordle_max_strikes}")
     print("Say letters to guess!")
-    
-    # Send game info to Arduino
+    # Send game info to Arduino with G: prefix
     send_to_arduino("G:", f"WORDLE: {' '.join(wordle_display)}")
 
 def handle_wordle_guess(letter):
@@ -182,8 +185,9 @@ def start_rps_game():
     print(f"Score - You: {rps_user_score} | Computer: {rps_computer_score}")
     print("Say 'rock', 'paper', or 'scissors' to play!")
     
-    # Send game info to Arduino
-    send_to_arduino("G:", f"RPS: {rps_user_score}-{rps_computer_score}")
+    # Send game info to Arduino with G: prefix
+    send_to_arduino("G:", f"RPS YOU:{rps_user_score} CPU:{rps_computer_score}")
+    send_to_arduino("G:", "YOUR MOVE?")
 
 def handle_rps_move(move):
     """Handle a rock paper scissors move"""
@@ -200,39 +204,59 @@ def handle_rps_move(move):
     
     computer_choice = random.choice(options)
     result_msg = f"You chose: {move} | Computer chose: {computer_choice}\n"
-    
+
+    # Determine result
     if move == computer_choice:
+        round_result = "TIE!"
         result_msg += "It's a tie!"
-        send_to_arduino("G:", f"TIE: {move} vs {computer_choice}")
     elif (move == "rock" and computer_choice == "scissors") or \
          (move == "paper" and computer_choice == "rock") or \
          (move == "scissors" and computer_choice == "paper"):
         rps_user_score += 1
+        round_result = "YOU WIN!"
         result_msg += "You win this round!"
-        send_to_arduino("G:", f"WIN: {rps_user_score}-{rps_computer_score}")
     else:
         rps_computer_score += 1
+        round_result = "CPU WIN!"
         result_msg += "Computer wins this round!"
-        send_to_arduino("G:", f"LOSE: {rps_user_score}-{rps_computer_score}")
-    
+
+    # Show what the user played
+    send_to_arduino("G:", f"You played: {move.title()}")
+    time.sleep(1)
+    # Show what the computer played
+    send_to_arduino("G:", f"CPU played: {computer_choice.title()}")
+    time.sleep(1)
+    # Show the result
+    send_to_arduino("G:", round_result)
+    time.sleep(1)
+    # Show the score
+    send_to_arduino("G:", f"You {rps_user_score} : CPU {rps_computer_score}")
+    time.sleep(1)
+
     result_msg += f"\nScore - You: {rps_user_score} | Computer: {rps_computer_score}"
     
     # Check for game end (first to 3 wins)
     if rps_user_score >= 3:
         rps_active = False
         result_msg += "\n🎉 YOU WIN THE GAME! Say 'play rock' to play again."
-        send_to_arduino("G:", "GAME WON!")
+        send_to_arduino("G:", "GAME OVER")
+        send_to_arduino("G:", "YOU WIN!")
     elif rps_computer_score >= 3:
         rps_active = False
         result_msg += "\n💀 COMPUTER WINS THE GAME! Say 'play rock' to play again."
-        send_to_arduino("G:", "GAME LOST!")
+        send_to_arduino("G:", "GAME OVER")
+        send_to_arduino("G:", "CPU WIN!")
     else:
         result_msg += "\nSay your next move!"
+        # Update display for next round
+        send_to_arduino("G:", f"You {rps_user_score} : CPU {rps_computer_score}")
+        send_to_arduino("G:", "YOUR MOVE?")
     
     return result_msg
 
 def extract_number(text):
     """Extract a number from the spoken text"""
+    print(f"[DEBUG] extract_number called with text: '{text}'")
     # Look for number words or digits
     number_words = {
         'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
@@ -245,11 +269,13 @@ def extract_number(text):
     
     # Convert word numbers to digits
     text_lower = text.lower()
+    print(f"[DEBUG] extract_number: text_lower='{text_lower}'")
     for word, digit in number_words.items():
         text_lower = text_lower.replace(word, digit)
     
     # Find any numbers in the text
     numbers = re.findall(r'\d+', text_lower)
+    print(f"[DEBUG] extract_number: found numbers={numbers}")
     if numbers:
         return int(numbers[0])
     return None
@@ -265,15 +291,20 @@ def start_number_game():
     print(f"\n>>> NUMBER GUESSING GAME STARTED! <<<")
     print(f"I'm thinking of a number between 1 and 100.")
     print("Say a number to make your guess!")
-    
-    # Send game info to Arduino
-    send_to_arduino("G:", "NUMBER: 1-100")
+    # Send game info to Arduino with G: prefix
+    send_to_arduino("G:", "NUMBER GAME | GUESS 1-100 | SAY A NUMBER")
 
 def handle_number_guess(guess_text):
     """Process the player's guess and provide feedback"""
     global num_guesses, number_game_active
     
-    guess = extract_number(guess_text)
+    # If guess_text is already an integer, use it directly
+    if isinstance(guess_text, int):
+        guess = guess_text
+    else:
+        guess = extract_number(guess_text)
+    
+    print(f"[DEBUG] handle_number_guess: guess={guess}")
     
     if not guess:
         return "I didn't catch a number. Please say a number between 1 and 100."
@@ -285,16 +316,16 @@ def handle_number_guess(guess_text):
     
     if guess < target_number:
         result = f"{guess} is too low! Try a higher number. (Guess #{num_guesses})"
-        send_to_arduino("G:", f"LOW: {guess} (#{num_guesses})")
+        send_to_arduino("G:", f"GUESS {num_guesses}: {guess} TOO LOW! TRY HIGHER")
         return result
     elif guess > target_number:
         result = f"{guess} is too high! Try a lower number. (Guess #{num_guesses})"
-        send_to_arduino("G:", f"HIGH: {guess} (#{num_guesses})")
+        send_to_arduino("G:", f"GUESS {num_guesses}: {guess} TOO HIGH! TRY LOWER")
         return result
     else:
         number_game_active = False
         result = f"🎉 Congratulations! You found the number {target_number} in {num_guesses} guesses! Say 'play number' to start a new game."
-        send_to_arduino("G:", f"CORRECT: {target_number} in {num_guesses}")
+        send_to_arduino("G:", f"CORRECT! {target_number} IN {num_guesses} GUESSES!")
         return result
 
 # ─── Streaming Speech → Text → Arduino ────────────────────────────────────────
@@ -340,6 +371,8 @@ def stream_speech_to_text():
         txt = res.alternatives[0].transcript
         now = time.time()
 
+        print(f"[DEBUG] Transcript: '{txt}' | final={res.is_final}")  # Debug print
+
         # throttle updates
         if txt != last and (res.is_final or now - last_time > cooldown):
             clear_console()
@@ -366,109 +399,121 @@ def stream_speech_to_text():
                 print(f"Translation: {tr}")
                 send_to_arduino("R:", tr)
 
-            # on final, handle games or detect game start
-            if res.is_final:
-                clean = re.sub(r'[^\w\s]', '', txt).lower()
+            # Process the transcript
+            clean = re.sub(r'[^-\x7f\w\s]', '', txt).lower().strip()
+            print(f"[DEBUG] Processing transcript: '{clean}' (final={res.is_final})")
 
+            # Check for stop/quit command first
+            if re.search(r'\b(stop|quit|exit)\b', clean, re.IGNORECASE):
+                print(f"[DEBUG] Detected stop/quit command.")
                 if wordle_active:
-                    # Handle Wordle game
-                    if re.search(r'\s*(quit\s*game|stop)\b', clean, re.IGNORECASE):
-                        wordle_active = False
-                        send_to_arduino("G:", "WORDLE ENDED")
-                        print("\n>>> Wordle game ended. Say 'play word' to start a new game.")
-                    else:
-                        # Extract single letter from transcript
-                        letters = re.findall(r'\b[A-Za-z]\b', clean)
-                        
-                        # Special handling for common speech recognition issues
-                        if not letters:
-                            if clean in ['i', 'a', 'o', 'u', 'e']:
-                                letters = [clean.upper()]
-                            elif clean in ['oh', 'owe']:
-                                letters = ['O']
-                            elif clean in ['ay', 'eh']:
-                                letters = ['A']
-                            elif clean in ['bee']:
-                                letters = ['B']
-                            elif clean in ['see', 'sea']:
-                                letters = ['C']
-                            elif clean in ['dee']:
-                                letters = ['D']
-                            elif clean in ['gee']:
-                                letters = ['G']
-                            elif clean in ['jay']:
-                                letters = ['J']
-                            elif clean in ['kay']:
-                                letters = ['K']
-                            elif clean in ['pee']:
-                                letters = ['P']
-                            elif clean in ['cue', 'queue', 'que']:
-                                letters = ['Q']
-                            elif clean in ['are']:
-                                letters = ['R']
-                            elif clean in ['tea', 'tee']:
-                                letters = ['T']
-                            elif clean in ['you', 'yu']:
-                                letters = ['U']
-                            elif clean in ['vee']:
-                                letters = ['V']
-                            elif clean in ['why']:
-                                letters = ['Y']
-                            elif clean in ['zee']:
-                                letters = ['Z']
-                            elif len(txt.strip()) <= 3:
-                                letter_match = re.search(r'([A-Za-z])', txt)
-                                if letter_match:
-                                    letters = [letter_match.group(1)]
-                        
-                        if letters:
-                            print(f">>> Extracted letter: '{letters[0]}'")
-                            guess_result = handle_wordle_guess(letters[0])
-                            print(f">>> {guess_result}")
-                            if not wordle_active:
-                                print("\n>>> Game ended. Say 'play word' to start a new game.")
-                        else:
-                            print(">>> Please say a single letter to guess!")
-
+                    wordle_active = False
+                    send_to_arduino("G:", "WORDLE ENDED")
+                    print("\n>>> Wordle game ended. Say 'play word' to start a new game.")
                 elif rps_active:
-                    # Handle Rock Paper Scissors game
-                    if re.search(r'\s*stop\b', clean, re.IGNORECASE):
-                        rps_active = False
-                        send_to_arduino("G:", "RPS ENDED")
-                        print("\n>>> Rock Paper Scissors game ended. Say 'play rock' to start a new game.")
-                    else:
-                        # Check for RPS moves
-                        if re.search(r'\brock\b', clean, re.IGNORECASE):
-                            move_result = handle_rps_move("rock")
-                            print(f">>> {move_result}")
-                        elif re.search(r'\bpaper\b', clean, re.IGNORECASE):
-                            move_result = handle_rps_move("paper")
-                            print(f">>> {move_result}")
-                        elif re.search(r'\bscissors\b', clean, re.IGNORECASE):
-                            move_result = handle_rps_move("scissors")
-                            print(f">>> {move_result}")
-                        else:
-                            print(">>> Please say 'rock', 'paper', or 'scissors'!")
-
+                    rps_active = False
+                    send_to_arduino("G:", "RPS ENDED")
+                    print("\n>>> Rock Paper Scissors game ended. Say 'play rock' to start a new game.")
                 elif number_game_active:
-                    # Handle Number Guessing game
-                    if re.search(r'\s*stop\b', clean, re.IGNORECASE):
-                        number_game_active = False
-                        send_to_arduino("G:", "NUMBER ENDED")
-                        print("\n>>> Number guessing game ended. Say 'play number' to start a new game.")
-                    else:
-                        # Process the guess
-                        guess_result = handle_number_guess(txt)
-                        print(f">>> {guess_result}")
+                    number_game_active = False
+                    send_to_arduino("G:", "NUMBER ENDED")
+                    print("\n>>> Number game ended. Say 'play number' to start a new game.")
+                return
 
+            # Process game moves
+            if wordle_active:
+                print("[DEBUG] Processing Wordle game")
+                # Special handling for common speech recognition issues
+                if clean in ['oh', 'owe']:
+                    letters = ['O']
+                elif len(clean) == 1 and clean.isalpha():
+                    letters = [clean]
                 else:
-                    # Check for game starts
-                    if re.search(r'\bplay\s+word\b', clean, re.IGNORECASE):
-                        start_wordle_game()
-                    elif re.search(r'\bplay\s+rock\b', clean, re.IGNORECASE):
-                        start_rps_game()
-                    elif re.search(r'\bplay\s+number\b', clean, re.IGNORECASE):
-                        start_number_game()
+                    # Extract single letter from transcript
+                    letters = re.findall(r'\b[A-Za-z]\b', clean)
+                    if not letters and len(clean) <= 3:
+                        letter_match = re.search(r'([A-Za-z])', clean)
+                        if letter_match:
+                            letters = [letter_match.group(1)]
+                print(f"[DEBUG] After extraction: clean='{clean}', letters={letters}")
+                if letters:
+                    print(f">>> Extracted letter: '{letters[0]}'")
+                    guess_result = handle_wordle_guess(letters[0].upper())
+                    print(f">>> {guess_result}")
+                    if not wordle_active:
+                        print("\n>>> Game ended. Say 'play word' to start a new game.")
+                    return
+                else:
+                    print(">>> Please say a single letter to guess!")
+                    return
+            elif rps_active:
+                print("[DEBUG] Processing RPS game")
+                # Improved: pick the first move mentioned in the transcript
+                original_lower = txt.lower().strip()
+                move_found = False
+                move_order = []
+                for move in ["rock", "paper", "scissors", "scissor"]:
+                    idx = original_lower.find(move)
+                    if idx != -1:
+                        move_order.append((idx, move))
+                if move_order:
+                    move_order.sort()
+                    chosen_move = move_order[0][1]
+                    if chosen_move == "scissor":
+                        chosen_move = "scissors"
+                    print(f"[DEBUG] Recognized RPS move: {chosen_move}")
+                    move_result = handle_rps_move(chosen_move)
+                    print(f">>> {move_result}")
+                    move_found = True
+                if not move_found:
+                    print(f">>> Didn't recognize move in: '{txt}'. Please say 'rock', 'paper', or 'scissors'!")
+                    send_to_arduino("G:", f"SAY: ROCK PAPER SCISSORS | YOU:{rps_user_score} CPU:{rps_computer_score}")
+                return
+            elif number_game_active:
+                print("[DEBUG] Processing Number game")
+                # Try to get a number from the input
+                guess = None
+                
+                # First try direct digit
+                if clean.isdigit():
+                    guess = int(clean)
+                    print(f"[DEBUG] Found direct digit: {guess}")
+                # Then try to extract from text
+                else:
+                    # Look for numbers in the text
+                    numbers = re.findall(r'\d+', clean)
+                    if numbers:
+                        guess = int(numbers[0])
+                        print(f"[DEBUG] Found number in text: {guess}")
+                
+                if guess is not None and 1 <= guess <= 100:
+                    print(f"[DEBUG] Processing valid guess: {guess}")
+                    guess_result = handle_number_guess(guess)
+                    print(f">>> {guess_result}")
+                else:
+                    print(">>> Please say a number between 1 and 100!")
+
+            # Check for game start commands
+            elif not (wordle_active or rps_active or number_game_active):
+                print("[DEBUG] Checking for game start commands")
+                if re.search(r'\b(play|start)\s*(?:the\s*)?(?:word|wordle)\b', clean, re.IGNORECASE):
+                    wordle_active = True
+                    rps_active = False
+                    number_game_active = False
+                    print("[DEBUG] Starting Wordle game.")
+                    start_wordle_game()
+                elif re.search(r'\b(play|start)\s*(?:the\s*)?(?:rock|rps)\b', clean, re.IGNORECASE):
+                    wordle_active = False
+                    rps_active = True
+                    number_game_active = False
+                    print("[DEBUG] Starting RPS game.")
+                    start_rps_game()
+                elif re.search(r'\b(play|start)\s*(?:the\s*)?(?:number|numbers?)\b', clean, re.IGNORECASE):
+                    wordle_active = False
+                    rps_active = False
+                    number_game_active = True
+                    print("[DEBUG] Starting Number game.")
+                    start_number_game()
 
             last = txt
             last_time = now
@@ -485,7 +530,8 @@ def main():
     time.sleep(3)
 
     try:
-        stream_speech_to_text()
+        while True:
+            stream_speech_to_text()
     except KeyboardInterrupt:
         print("\n[INFO] Stopped by user.")
     finally:
