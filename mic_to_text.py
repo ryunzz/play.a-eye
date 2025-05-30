@@ -46,7 +46,7 @@ def handle_conversation(user_input):
         return "(Empty input detected)"
     
     # Check for conversation end
-    if re.search(r'\s*slay\s*,?\s*sentient\b', user_input, re.IGNORECASE):
+    if re.search(r'\s*bye\s*,?\s*sentient\b', user_input, re.IGNORECASE):
         conversation_active = False
         conversation_history = []
         return "Goodbye! It was nice talking to you."
@@ -61,7 +61,7 @@ def handle_conversation(user_input):
         ] + conversation_history
         
         response = llm.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=messages,
             temperature=0.7,
             max_tokens=150
@@ -181,9 +181,10 @@ def stream_speech_to_text():
                     print(">>> Say 'hey, sentient' to start a conversation")
                 print(f"Transcription: {transcript}")
 
-                # Always translate everything
+                # Still translate but only print if not in active conversation
                 translated_text = translate_text(transcript, target_language)
-                print(f"Translation: {translated_text}")
+                if not conversation_active:
+                    print(f"Translation: {translated_text}")
 
                 # Handle conversation if needed
                 if result.is_final:
@@ -194,17 +195,11 @@ def stream_speech_to_text():
                             print("\n>>> Starting conversation with Sentient...")
                             response = handle_conversation("Hello!")
                             print(f"Sentient: {response}")
-                            # Translate Sentient's response too
-                            translated_response = translate_text(response, target_language)
-                            print(f"Translation: {translated_response}")
                     else:
                         # Continue conversation
                         response = handle_conversation(transcript)
                         print(f"Sentient: {response}")
-                        # Translate Sentient's response too
-                        translated_response = translate_text(response, target_language)
-                        print(f"Translation: {translated_response}")
-                        
+                      
                         # Check if conversation just ended
                         if not conversation_active:
                             print("\n>>> Conversation ended. Say 'Hey Sentient' to start a new conversation.")
